@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operation Ransomware — Incident Response Terminal</title>
+<style>
+  :root{
+    --navy:#0a1628; --navy2:#0f2138; --panel:#12243d; --line:rgba(255,255,255,.08);
+    --cyan:#22c7e0; --cyan-dim:#1798ad; --amber:#f5a623; --red:#ff5c6c; --green:#34d399;
+    --text:#e7eef6; --muted:#8aa0b6; --mono:"SF Mono","Consolas","Courier New",monospace;
+    --sans:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--navy);color:var(--text);font-family:var(--sans);
+       display:flex;flex-direction:column;min-height:100%}
+  a{color:var(--cyan)}
+  /* top bar */
+  .topbar{display:flex;align-items:center;gap:12px;padding:10px 18px;
+    background:var(--navy2);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .brand{font-family:var(--mono);font-weight:700;letter-spacing:.5px}
+  .brand .p{color:var(--cyan)}
+  .pill{font-family:var(--mono);font-size:12px;color:var(--muted);
+    border:1px solid var(--line);border-radius:999px;padding:4px 10px}
+  .pill b{color:var(--text)}
+  .lock{margin-left:auto;font-family:var(--mono);font-size:13px;color:var(--amber)}
+  .lock.open{color:var(--green)}
+  /* main grid */
+  .wrap{flex:1;display:grid;grid-template-columns:1fr 320px;gap:0;min-height:0}
+  @media (max-width:820px){.wrap{grid-template-columns:1fr}}
+  /* terminal */
+  .term{display:flex;flex-direction:column;min-height:0;background:#08111f}
+  .termhead{display:flex;align-items:center;gap:8px;padding:8px 14px;background:#0b1a2e;border-bottom:1px solid var(--line)}
+  .dot{width:12px;height:12px;border-radius:50%}
+  .dot.r{background:#ff5f56}.dot.y{background:#ffbd2e}.dot.g{background:#27c93f}
+  .termtitle{font-family:var(--mono);font-size:12px;color:var(--muted);margin-left:6px}
+  .screen{flex:1;overflow-y:auto;padding:16px 18px;font-family:var(--mono);font-size:14.5px;line-height:1.55}
+  .screen .out{white-space:pre-wrap;word-break:break-word}
+  .green{color:var(--green)}.cyan{color:var(--cyan)}.amber{color:var(--amber)}.red{color:var(--red)}.muted{color:var(--muted)}
+  .inputline{display:flex;align-items:center;font-family:var(--mono);font-size:14.5px;padding:6px 18px 18px}
+  .prompt{color:var(--cyan);white-space:nowrap;margin-right:8px}
+  .prompt b{color:var(--green)}
+  #cmd{flex:1;background:transparent;border:0;outline:0;color:var(--text);font-family:var(--mono);font-size:14.5px}
+  /* sidebar */
+  .side{background:var(--panel);border-left:1px solid var(--line);overflow-y:auto;padding:16px 16px 28px}
+  @media (max-width:820px){.side{border-left:0;border-top:1px solid var(--line)}}
+  .side h3{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--cyan);margin:0 0 10px}
+  .bar{height:8px;border-radius:999px;background:#0a1628;overflow:hidden;margin:0 0 6px}
+  .bar > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--cyan-dim),var(--cyan));transition:width .35s}
+  .barlbl{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:16px}
+  ol.obj{list-style:none;margin:0;padding:0;counter-reset:o}
+  ol.obj li{position:relative;padding:9px 8px 9px 34px;border-radius:8px;font-size:13.5px;line-height:1.4;color:var(--muted);counter-increment:o}
+  ol.obj li::before{content:counter(o);position:absolute;left:8px;top:8px;width:18px;height:18px;border-radius:50%;
+    background:#0a1628;border:1px solid var(--line);color:var(--muted);font-family:var(--mono);font-size:11px;
+    display:flex;align-items:center;justify-content:center}
+  ol.obj li.done{color:var(--text)}
+  ol.obj li.done::before{content:"\2713";background:var(--green);border-color:var(--green);color:#06281d;font-weight:700}
+  ol.obj li.active{background:#0c1d33;color:var(--text)}
+  ol.obj li.active::before{border-color:var(--cyan);color:var(--cyan)}
+  .hintbtn{margin-top:14px;width:100%;background:transparent;color:var(--amber);border:1px solid rgba(245,166,35,.4);
+    border-radius:8px;padding:9px;font-family:var(--mono);font-size:13px;cursor:pointer}
+  .hintbtn:hover{background:rgba(245,166,35,.08)}
+  .flagbox{margin-top:16px;border-top:1px solid var(--line);padding-top:14px}
+  .flagbox label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-family:var(--mono)}
+  .flagrow{display:flex;gap:8px}
+  #flag{flex:1;background:#0a1628;border:1px solid var(--line);border-radius:8px;color:var(--text);
+    font-family:var(--mono);font-size:13px;padding:9px}
+  #flagsubmit{background:var(--cyan);color:#06222a;border:0;border-radius:8px;padding:9px 12px;font-weight:700;cursor:pointer;font-family:var(--mono)}
+  #flagmsg{font-family:var(--mono);font-size:12px;margin-top:8px;min-height:16px}
+  /* victory overlay */
+  .overlay{position:fixed;inset:0;background:rgba(4,10,20,.92);display:none;align-items:center;justify-content:center;padding:24px;z-index:20}
+  .overlay.show{display:flex}
+  .card{max-width:560px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:34px;text-align:center}
+  .card .big{font-size:42px;margin:0 0 6px}
+  .card h2{margin:.2em 0;color:var(--green)}
+  .card p{color:var(--muted);line-height:1.6}
+  .card .flagshow{font-family:var(--mono);color:var(--cyan);background:#0a1628;border:1px solid var(--line);border-radius:8px;padding:10px;margin:14px 0;display:inline-block}
+  .card button{margin-top:8px;background:transparent;border:1px solid var(--line);color:var(--text);border-radius:8px;padding:9px 16px;cursor:pointer;font-family:var(--mono)}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="brand">&gt;<span class="p">_</span> OPERATION RANSOMWARE</span>
+    <span class="pill">host <b>victim-server</b></span>
+    <span class="pill">user <b id="userpill">intern</b></span>
+    <span class="lock" id="lock">&#128274; SERVER LOCKED</span>
+  </div>
+
+  <div class="wrap">
+    <section class="term">
+      <div class="termhead">
+        <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="termtitle">bash &mdash; incident-response &mdash; 100&times;30</span>
+      </div>
+      <div class="screen" id="screen"><div class="out" id="boot"></div></div>
+      <div class="inputline">
+        <span class="prompt"><b id="p_user">intern@victim-server</b>:<span id="p_path">~</span>$</span>
+        <input id="cmd" autocomplete="off" autocapitalize="off" spellcheck="false" autofocus>
+      </div>
+    </section>
+
+    <aside class="side">
+      <h3>Mission objectives</h3>
+      <div class="bar"><i id="barfill"></i></div>
+      <div class="barlbl"><span id="donecount">0</span> / 8 complete</div>
+      <ol class="obj" id="objlist"></ol>
+      <button class="hintbtn" id="hintbtn">Stuck? Reveal the next command</button>
+      <div class="flagbox">
+        <label>Final flag (recovered with sudo)</label>
+        <div class="flagrow">
+          <input id="flag" placeholder="CS4CS{...}" autocomplete="off">
+          <button id="flagsubmit">Submit</button>
+        </div>
+        <div id="flagmsg"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="overlay" id="overlay">
+    <div class="card">
+      <div class="big">&#128275;</div>
+      <h2>Server recovered</h2>
+      <p>You traced a low-privilege foothold, fixed a broken permission, and used <b>sudo</b> to read the key only root could touch. That last jump is <b>privilege escalation</b> &mdash; the move almost every real attack is fighting to make.</p>
+      <div class="flagshow" id="flagshow"></div>
+      <p class="muted">Lesson: if the intern account had stayed least-privilege and admin hadn't left a sudo hole, the attacker never reaches the key.</p>
+      <button onclick="document.getElementById('overlay').classList.remove('show')">Back to terminal</button>
+    </div>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+  const FLAG = "CS4CS{r00t_4cc3ss_rec0v3r3d}";
+
+  // ---------- virtual filesystem ----------
+  // node: {type:'dir'|'file', owner, perm, content, children}
+  function f(owner, perm, content){ return {type:'file', owner, perm, content}; }
+  function d(owner, perm, children){ return {type:'dir', owner, perm, children:children||{}}; }
+
+  const fs = d('root','drwxr-xr-x',{
+    home: d('root','drwxr-xr-x',{
+      intern: d('intern','drwxr-xr-x',{
+        'briefing.txt': f('intern','-rw-r--r--',
+          "INCIDENT RESPONSE BRIEFING\n"+
+          "==========================\n"+
+          "Ransomware has locked victim-server. You are logged in as 'intern',\n"+
+          "a STANDARD user (not admin). Work the system step by step.\n\n"+
+          "1) Standard users can't see everything. Some files are HIDDEN.\n"+
+          "   Try listing ALL files, including hidden ones.\n"+
+          "2) The recovery tool 'recover.sh' is in this folder but won't run yet.\n\n"+
+          "Find the hidden recovery folder to learn how to get the key."),
+        'recover.sh': f('intern','-rw-r--r--',
+          "#!/bin/bash\n"+
+          "echo 'RECOVERY TOOL ONLINE'\n"+
+          "echo 'The decryption key lives in /root/ (admin only).'\n"+
+          "echo 'But admin reused credentials and left this account on the sudo list.'\n"+
+          "echo 'Try:  sudo cat /root/decryption_key.txt'"),
+        logs: d('intern','drwxr-xr-x',{
+          'access.log': f('intern','-rw-r--r--',
+            "08:14 login intern ok\n08:15 download Invoice_URGENT.pdf.exe\n08:15 EXEC suspicious binary\n08:16 outbound connection to 185.220.101.42\n")
+        }),
+        '.recovery': d('intern','drwx------',{
+          'note.txt': f('intern','-rw-------',
+            "HIDDEN RECOVERY NOTE\n"+
+            "--------------------\n"+
+            "Step A: the recovery script needs EXECUTE permission.\n"+
+            "        Look at its permissions:  ls -l recover.sh\n"+
+            "        It shows -rw-r--r--  (no 'x' = cannot run).\n"+
+            "        Give it execute:          chmod +x recover.sh\n"+
+            "        Then run it:              ./recover.sh\n")
+        })
+      }),
+      admin: d('admin','drwx------',{
+        'passwords.kdbx': f('admin','-rw-------',"(encrypted)")
+      })
+    }),
+    root: d('root','drwx------',{
+      'decryption_key.txt': f('root','-rw-------', "DECRYPTION KEY: "+FLAG+"\nFiles unlocked. Incident contained.")
+    }),
+    var: d('root','drwxr-xr-x',{
+      www: d('root','drwxr-xr-x',{ 'index.html': f('root','-rw-r--r--',"<h1>Company Intranet</h1>") })
+    })
+  });
+
+  // ---------- shell state ----------
+  const USER='intern';
+  let cwd=['home','intern'];           // current path as array
+  const screen=document.getElementById('screen');
+  const cmdEl=document.getElementById('cmd');
+
+  function nodeAt(parts){
+    let n=fs;
+    for(const p of parts){ if(n.type!=='dir'||!n.children[p]) return null; n=n.children[p]; }
+    return n;
+  }
+  function resolve(arg){
+    // returns path-array or null. supports absolute, ~, .., ., relative, trailing names
+    if(arg===undefined) return cwd.slice();
+    let parts;
+    if(arg==='~'||arg==='') return ['home','intern'];
+    if(arg.startsWith('/')) parts=[];
+    else if(arg.startsWith('~/')){ parts=['home','intern']; arg=arg.slice(2);}
+    else parts=cwd.slice();
+    for(const seg of arg.split('/')){
+      if(seg===''||seg==='.') continue;
+      if(seg==='..'){ if(parts.length) parts.pop(); }
+      else parts.push(seg);
+    }
+    return parts;
+  }
+  function pathStr(){ return '/'+cwd.join('/'); }
+  function shortPath(){ return cwd.join('/')==='home/intern' ? '~' : '/'+cwd.join('/'); }
+
+  // permission check: intern is OWNER if file.owner===USER else OTHER
+  function canRead(node){ return node.owner===USER ? node.perm[1]==='r' : node.perm[7]==='r'; }
+  function canExec(node){ return node.owner===USER ? node.perm[3]==='x' : node.perm[9]==='x'; }
+
+  // ---------- objectives ----------
+  const objectives=[
+    {id:'whoami', label:'Identify the account you control', hint:'whoami', done:false},
+    {id:'pwd',    label:'Find where you are in the system', hint:'pwd', done:false},
+    {id:'ls',     label:'List the files around you', hint:'ls', done:false},
+    {id:'brief',  label:'Read the briefing', hint:'cat briefing.txt', done:false},
+    {id:'hidden', label:'Reveal the hidden files', hint:'ls -la', done:false},
+    {id:'perms',  label:'Inspect recover.sh permissions', hint:'ls -l recover.sh', done:false},
+    {id:'chmod',  label:'Give recover.sh execute permission and run it', hint:'chmod +x recover.sh   then   ./recover.sh', done:false},
+    {id:'escalate',label:'Escalate with sudo to read the key', hint:'sudo cat /root/decryption_key.txt', done:false}
+  ];
+  function renderObjectives(){
+    const list=document.getElementById('objlist'); list.innerHTML='';
+    let done=0, firstUndone=true;
+    objectives.forEach(o=>{
+      const li=document.createElement('li');
+      li.textContent=o.label;
+      if(o.done){li.className='done';done++;}
+      else if(firstUndone){li.className='active';firstUndone=false;}
+      list.appendChild(li);
+    });
+    document.getElementById('donecount').textContent=done;
+    document.getElementById('barfill').style.width=(done/objectives.length*100)+'%';
+  }
+  function complete(id){
+    const o=objectives.find(x=>x.id===id);
+    if(o&&!o.done){o.done=true;renderObjectives();}
+  }
+  function nextHint(){ const o=objectives.find(x=>!x.done); return o?o.hint:'All objectives complete &mdash; submit the flag!'; }
+
+  // ---------- output ----------
+  function print(text, cls){
+    const div=document.createElement('div'); div.className='out'+(cls?(' '+cls):'');
+    div.textContent=text; screen.appendChild(div); screen.scrollTop=screen.scrollHeight;
+  }
+  function printRich(html){
+    const div=document.createElement('div'); div.className='out'; div.innerHTML=html;
+    screen.appendChild(div); screen.scrollTop=screen.scrollHeight;
+  }
+  function echoCmd(raw){
+    const div=document.createElement('div'); div.className='out';
+    div.innerHTML='<span class="prompt"><b>'+USER+'@victim-server</b>:'+shortPath()+'$</span> '+escapeHtml(raw);
+    screen.appendChild(div);
+  }
+  function escapeHtml(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));}
+
+  // ---------- ls rendering ----------
+  function lsList(node, opts){
+    const all=opts.indexOf('a')>=0, long=opts.indexOf('l')>=0;
+    let names=Object.keys(node.children);
+    if(!all) names=names.filter(n=>!n.startsWith('.'));
+    names.sort();
+    if(all) names=['.','..'].concat(names);
+    if(!long){ print(names.join('   ')); return; }
+    let lines=[];
+    names.forEach(n=>{
+      let ch = n==='.'?node : n==='..'?node : node.children[n];
+      const perm=ch.perm, owner=ch.owner.padEnd(6);
+      const size = ch.type==='dir' ? '4096' : String((ch.content||'').length);
+      lines.push(perm+'  '+owner+'  '+size.padStart(5)+'  '+n);
+    });
+    print(lines.join('\n'));
+  }
+
+  // ---------- command handler ----------
+  function run(raw){
+    const line=raw.trim();
+    echoCmd(raw);
+    if(line==='') return;
+    let parts=line.split(/\s+/);
+    let cmd=parts[0], args=parts.slice(1);
+    let sudo=false;
+    if(cmd==='sudo'){ sudo=true; cmd=args[0]; args=args.slice(1); }
+
+    switch(cmd){
+      case 'help':
+        printRich('<span class="muted">Available commands:</span> whoami, pwd, ls (-a -l -la), cd, cat, chmod, ./recover.sh, sudo, clear\n'+
+                  '<span class="muted">Tip: follow the slides &mdash; each objective on the right matches one step.</span>');
+        break;
+      case 'whoami':
+        print(USER, 'cyan'); complete('whoami');
+        printRich('<span class="muted">You are a STANDARD user, not admin/root. That limits what you can touch.</span>');
+        break;
+      case 'id':
+        print('uid=1001('+USER+') gid=1001('+USER+') groups=1001('+USER+'),27(sudo)'); break;
+      case 'pwd':
+        print(pathStr(),'cyan'); complete('pwd'); break;
+      case 'clear':
+        screen.innerHTML=''; break;
+      case 'ls': {
+        let opts=''; let targetArg=null;
+        args.forEach(a=>{ if(a.startsWith('-')) opts+=a.slice(1); else targetArg=a; });
+        const target = targetArg!==null ? resolve(targetArg) : cwd.slice();
+        const node=nodeAt(target);
+        if(!node){ print('ls: cannot access \''+targetArg+'\': No such file or directory','red'); break; }
+        const long=opts.indexOf('l')>=0;
+        if(node.type==='file'){
+          const name=target[target.length-1];
+          if(long) print(node.perm+'  '+node.owner.padEnd(6)+'  '+String((node.content||'').length).padStart(5)+'  '+name);
+          else print(name);
+          complete('ls');
+          if(long && targetArg==='recover.sh'){
+            complete('perms');
+            printRich('<span class="muted">recover.sh is <span class="amber">-rw-r--r--</span> &mdash; no <b>x</b>, so it cannot be executed yet. Fix it with <span class="cyan">chmod +x recover.sh</span>.</span>');
+          }
+          break;
+        }
+        if(node.owner!==USER && node.perm[7]!=='r'){ print('ls: cannot open directory \''+(targetArg||'.')+'\': Permission denied','red'); break; }
+        lsList(node, opts);
+        complete('ls');
+        if(opts.indexOf('a')>=0){
+          complete('hidden');
+          printRich('<span class="muted">Notice the hidden <span class="cyan">.recovery</span> folder (names starting with . are hidden). The 10 letters on the left are permissions: type + owner rwx + group rwx + other rwx.</span>');
+        }
+        break;
+      }
+      case 'cd': {
+        if(args.length===0){ cwd=['home','intern']; updatePrompt(); break; }
+        const target=resolve(args[0]); const node=nodeAt(target);
+        if(!node){ print('cd: '+args[0]+': No such file or directory','red'); break; }
+        if(node.type!=='dir'){ print('cd: '+args[0]+': Not a directory','red'); break; }
+        if(node.owner!==USER && node.perm[7]!=='x'){ print('cd: '+args[0]+': Permission denied','red'); break; }
+        cwd=target; updatePrompt(); break;
+      }
+      case 'cat': {
+        if(args.length===0){ print('cat: missing file operand','red'); break; }
+        const target=resolve(args[0]); const node=nodeAt(target);
+        if(!node){ print('cat: '+args[0]+': No such file or directory','red'); break; }
+        if(node.type==='dir'){ print('cat: '+args[0]+': Is a directory','red'); break; }
+        if(!sudo && !canRead(node)){
+          print('cat: '+args[0]+': Permission denied','red');
+          if(target.join('/')==='root/decryption_key.txt')
+            printRich('<span class="muted">That file is owned by <b>root</b> (-rw-------). A standard user can\'t read it. You\'ll need to escalate privileges.</span>');
+          break;
+        }
+        print(node.content);
+        const tp=target.join('/');
+        if(tp==='home/intern/briefing.txt') complete('brief');
+        if(tp==='home/intern/.recovery/note.txt') {/* reading the hidden note is great but not a tracked objective */}
+        if(sudo && tp==='root/decryption_key.txt'){ complete('escalate'); winHint(); }
+        break;
+      }
+      case 'chmod': {
+        if(args.length<2){ print('chmod: missing operand','red'); break; }
+        const mode=args[0]; const target=resolve(args[1]); const node=nodeAt(target);
+        if(!node){ print('chmod: cannot access \''+args[1]+'\': No such file or directory','red'); break; }
+        if(node.owner!==USER && !sudo){ print('chmod: changing permissions of \''+args[1]+'\': Operation not permitted','red'); break; }
+        if(mode==='+x'||mode==='755'||mode==='u+x'||mode==='a+x'){
+          node.perm='-rwxr-xr-x';
+          print('');
+          printRich('<span class="green">Permission updated.</span> <span class="muted">recover.sh is now -rwxr-xr-x (executable). Run it with ./recover.sh</span>');
+        } else {
+          print('chmod: invalid or unsupported mode for this lab. Use: chmod +x recover.sh','amber');
+        }
+        break;
+      }
+      case './recover.sh':
+      case 'recover.sh': {
+        const node=nodeAt(['home','intern','recover.sh']);
+        if(cwd.join('/')!=='home/intern'){ print('bash: ./recover.sh: No such file or directory (cd ~ first)','red'); break; }
+        if(!canExec(node)){
+          print('bash: ./recover.sh: Permission denied','red');
+          printRich('<span class="muted">No execute permission yet. Run <span class="cyan">chmod +x recover.sh</span> first.</span>');
+          break;
+        }
+        print(node.content.split('\n').slice(1).map(l=>l.replace(/^echo '?|'?$/g,'')).join('\n'),'cyan');
+        complete('chmod');
+        break;
+      }
+      case 'sudo':
+        print('sudo: a command is required. Try: sudo cat /root/decryption_key.txt','amber'); break;
+      case undefined:
+        break;
+      default:
+        print('bash: '+cmd+': command not found','red');
+        printRich('<span class="muted">Type <span class="cyan">help</span> to see what this terminal accepts.</span>');
+    }
+  }
+
+  function winHint(){
+    document.getElementById('lock').textContent='\u{1F513} sudo successful';
+    document.getElementById('lock').classList.add('open');
+    printRich('<span class="green">'+ 'Key recovered. Now copy the flag into the box on the right and submit it.' +'</span>');
+  }
+
+  function updatePrompt(){ document.getElementById('p_path').textContent=shortPath(); }
+
+  // ---------- boot ----------
+  const boot=document.getElementById('boot');
+  boot.innerHTML =
+    '<span class="amber">*** victim-server :: RANSOMWARE DETECTED :: files encrypted ***</span>\n'+
+    '<span class="muted">Emergency shell granted to account: </span><span class="cyan">intern</span>\n'+
+    '<span class="muted">Mission: work through the system, recover the decryption key, unlock the server.</span>\n'+
+    '<span class="muted">Follow the slides. Each step matches one objective on the right. Type </span><span class="cyan">help</span><span class="muted"> any time.</span>\n ';
+  renderObjectives();
+
+  // ---------- input ----------
+  const history=[]; let hi=-1;
+  cmdEl.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){ const v=cmdEl.value; if(v.trim())history.push(v); hi=history.length; run(v); cmdEl.value=''; }
+    else if(e.key==='ArrowUp'){ if(hi>0){hi--;cmdEl.value=history[hi];} e.preventDefault(); }
+    else if(e.key==='ArrowDown'){ if(hi<history.length-1){hi++;cmdEl.value=history[hi];}else{hi=history.length;cmdEl.value='';} e.preventDefault(); }
+  });
+  document.querySelector('.term').addEventListener('click',()=>cmdEl.focus());
+
+  document.getElementById('hintbtn').addEventListener('click',()=>{
+    printRich('<span class="amber">HINT &raquo; </span><span class="cyan">'+nextHint()+'</span>');
+    cmdEl.focus();
+  });
+
+  // ---------- flag submit ----------
+  document.getElementById('flagsubmit').addEventListener('click',submitFlag);
+  document.getElementById('flag').addEventListener('keydown',e=>{if(e.key==='Enter')submitFlag();});
+  function submitFlag(){
+    const v=document.getElementById('flag').value.trim();
+    const msg=document.getElementById('flagmsg');
+    if(v===FLAG){
+      msg.style.color='var(--green)'; msg.textContent='Correct. Server unlocked.';
+      complete('escalate');
+      document.getElementById('flagshow').textContent=FLAG;
+      document.getElementById('overlay').classList.add('show');
+      document.getElementById('lock').textContent='\u{1F513} SERVER UNLOCKED';
+      document.getElementById('lock').classList.add('open');
+    } else if(v===''){
+      msg.style.color='var(--muted)'; msg.textContent='Paste the flag you recovered with sudo.';
+    } else {
+      msg.style.color='var(--red)'; msg.textContent='Not quite. Re-read the key from /root with sudo.';
+    }
+  }
+})();
+</script>
+</body>
+</html>
